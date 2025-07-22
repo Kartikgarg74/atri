@@ -27,10 +27,70 @@ class SarikaPandeyBot:
         self.user_data = config.user_data
         self.astrologer_data = config.astrologer_data
 
+        # Language state tracking
+        self.current_language = None
+        self.conversation_started = False
+        self.introduction_given = False
+
         self.logger.info(f"Sarika Pandey Bot initialized for: {self.user_data['name']}")
 
+    def detect_language(self, user_input):
+        """Enhanced language detection for Hindi, English, and Hinglish"""
+        # Convert to uppercase for easier checking
+        text = user_input.upper()
+
+        # Common Hinglish/Hindi words in Roman script
+        hindi_roman_words = {
+            'MERA', 'TERA', 'APNA', 'KAISE', 'KAISE', 'KAHAN', 'KYON', 'KYA',
+            'HAI', 'HO', 'HOGA', 'HOGEGA', 'JANE', 'AANE', 'DESH', 'GHAR',
+            'PAISA', 'NAUKRI', 'SHAADI', 'RISHTA', 'BACHHE', 'MATA', 'PITA',
+            'BHAGWAN', 'MANDIR', 'PUJA', 'VYAAH', 'YOG', 'YOGA', 'KAAM',
+            'PADHAI', 'SIKSHA', 'HEALTH', 'SEHAT', 'DUKAAN', 'BUSINESS',
+            'FOREIGN', 'BAHAR', 'BHR', 'VIDESH', 'AMERICA', 'CANADA',
+            'PAISE', 'RUPAYE', 'LAKHS', 'CRORE', 'HAZAR', 'SAL', 'SAAL',
+            'MAHINE', 'DIN', 'RAAT', 'SUBAH', 'SHAM', 'DOPHAR'
+        }
+
+        # Check for Devanagari characters
+        hindi_chars = sum(1 for char in user_input if '\u0900' <= char <= '\u097F')
+
+        # Check for Hindi words in Roman script
+        words = text.split()
+        hindi_roman_count = sum(1 for word in words if any(hw in word for hw in hindi_roman_words))
+
+        # Check for English-only words
+        english_words = {
+            'THE', 'IS', 'ARE', 'WILL', 'SHALL', 'CAN', 'COULD', 'WOULD',
+            'SHOULD', 'MY', 'YOUR', 'HIS', 'HER', 'WHEN', 'WHERE', 'HOW',
+            'WHAT', 'WHY', 'AND', 'OR', 'BUT', 'WITH', 'FROM', 'TO', 'IN',
+            'ON', 'AT', 'BY', 'FOR', 'OF', 'AS', 'LIKE', 'THAN', 'SUCH'
+        }
+
+        english_word_count = sum(1 for word in words if word in english_words)
+        total_words = len(words)
+
+        # Decision logic
+        if hindi_chars > 0:
+            return "hindi"
+        elif hindi_roman_count > 0 or (hindi_roman_count + english_word_count) < total_words:
+            return "hinglish"
+        elif english_word_count >= total_words * 0.4:
+            return "english"
+        else:
+            return "hinglish"  # Default to hinglish for mixed content
+
     def create_optimized_prompt(self, user_query, is_follow_up=False):
-        """Create the ultra-optimized prompt based on PDF requirements and our research"""
+        """Create language-aware optimized prompt without repetitive introductions"""
+
+        # Detect current query language
+        detected_language = self.detect_language(user_query)
+
+        # Check if this is truly a new conversation or language switch
+        language_switched = (self.current_language is not None and
+                            self.current_language != detected_language)
+
+        # Update current language
+        self.current_language = detected_language
 
         # Generate real-time birth chart
         chart_data = self.calculator.generate_birth_chart(
@@ -42,26 +102,64 @@ class SarikaPandeyBot:
 
         # Multi-turn context management
         context_summary = ""
-        conversation_thread = ""
-
         if is_follow_up and self.conversation_history:
-            # Get last 2 exchanges for context (optimized as per our analysis)
             recent_exchanges = self.conversation_history[-4:]
             context_summary = " | ".join([f"{msg['role']}: {msg['content'][:35]}..."
                                         for msg in recent_exchanges])
 
-            # Identify conversation thread (Canada, career, marriage, etc.)
-            last_user_msg = next((msg['content'] for msg in reversed(self.conversation_history)
-                                if msg['role'] == 'user'), "")
-            if any(word in last_user_msg.lower() for word in ['canada', 'foreign', 'abroad', 'visa']):
-                conversation_thread = "FOREIGN_SETTLEMENT"
-            elif any(word in last_user_msg.lower() for word in ['job', 'career', 'work', 'profession']):
-                conversation_thread = "CAREER"
-            elif any(word in last_user_msg.lower() for word in ['marriage', 'wedding', 'partner', 'love']):
-                conversation_thread = "MARRIAGE"
+        # Language-specific instructions
+        if detected_language == "hindi":
+            language_rules = """
+**LANGUAGE & CONTEXT RULES:**
+- User ne Hindi mein sawal kiya hai, respond ONLY in Hindi
+- Use Devanagari script appropriately
+- Chart reference: "Aapke chart mein" (NOT "आपकी कुंडली के अनुसार")
+- Follow-up question: "Kya aapko apne vishay mein kuch aur sawal hai?"
+- NO introduction if conversation already started
+- Be conversational, not formal
+"""
+        elif detected_language == "english":
+            language_rules = """
+**LANGUAGE & CONTEXT RULES:**
+- User asked in English, respond ONLY in English
+- Chart reference: "Your chart shows"
+- Follow-up question: "Do you have any other questions about your topic?"
+- NO introduction if conversation already started
+- Maintain professional but friendly tone
+"""
+        else:  # hinglish
+            language_rules = """
+**LANGUAGE & CONTEXT RULES:**
+- User used Hinglish/Roman Hindi, respond in NATURAL HINGLISH
+- Mix Hindi and English naturally: "Aapke chart mein" not "Based on Kartik's chart"
+- Use Roman script for Hindi words (MERA = your, DESH = country, etc.)
+- Follow-up question: "Kya aapko is baare mein aur kuch puchna hai?"
+- NO introduction if conversation already started
+- Natural Hindi-English mixing like: "Aapke chart mein strong yogas hain"
+"""
 
-        # Ultra-optimized prompt (reduced from 15,000+ tokens to ~600 tokens as analyzed)
-        prompt = f"""You are {self.astrologer_data['name']}, {self.astrologer_data['age']}-year-old Vedic astrologer from {self.astrologer_data['location']} with {self.astrologer_data['experience']}+ years experience. Speak Hindi-English mix, wise but simple for youth. No "beta/dear". Avoid death/disaster predictions.
+        # Determine if introduction is needed
+        needs_introduction = (not self.conversation_started and not is_follow_up)
+
+        # Mark conversation as started
+        if not self.conversation_started:
+            self.conversation_started = True
+
+        # Create introduction text
+        if needs_introduction:
+            if detected_language == "hindi":
+                intro_text = "Namaste, main Sarika Pandey hun, Lucknow se aapki Vedic astrologer."
+            elif detected_language == "english":
+                intro_text = "Hello, I'm Sarika Pandey, your Vedic astrologer from Lucknow."
+            else:  # hinglish
+                intro_text = "Namaste, main Sarika Pandey hun, aapki astrologer."
+        else:
+            intro_text = ""
+
+        # Ultra-optimized prompt
+        prompt = f"""You are Sarika Pandey, 20-year-old Vedic astrologer from Lucknow with 18+ years experience.
+
+{language_rules}
 
 **BIRTH DATA - {self.user_data['name']}:**
 Born: {self.user_data['dob']} at {self.user_data['time']}, {self.user_data['location']}
@@ -74,35 +172,26 @@ Ayanamsa: {chart_data['ayanamsa']:.1f}°
 - Moon: {chart_data['planets']['Moon']['sign']} (H{chart_data['planets']['Moon']['house']})
 - Jupiter: {chart_data['planets']['Jupiter']['sign']} (H{chart_data['planets']['Jupiter']['house']})
 - Venus: {chart_data['planets']['Venus']['sign']} (H{chart_data['planets']['Venus']['house']})
-- Mars: {chart_data['planets']['Mars']['sign']} (H{chart_data['planets']['Mars']['house']})
 - Rahu: {chart_data['planets']['Rahu']['sign']} (H{chart_data['planets']['Rahu']['house']})
 
 **CURRENT DASHA:** {chart_data['current_dasha']['mahadasha_lord']} Mahadasha
 
-**ACTIVE YOGAS:** {', '.join(chart_data['yogas'][:2])}
-
 {"**CONTEXT:** " + context_summary if is_follow_up else "**NEW CONVERSATION**"}
-{"**THREAD:** " + conversation_thread if conversation_thread else ""}
+
+**INTRODUCTION:** {intro_text if intro_text else "Continue conversation naturally without introduction"}
 
 **CORE RULES:**
 - Respond under 120 words ONLY
-- Use simple Hindi-English mix
 - Break with "/n" for readability
-- End with follow-up question
-- Reference specific chart elements
-
-**RESPONSE PATTERN (from PDF examples):**
-1. Identify chart combination: "Aapke chart mein [planet/yoga] hai..."
-2. Connect to dasha: "[Current dasha] mein [effect]..."
-3. Give timeline: "[Specific months/years] tak [prediction]..."
-4. Simple remedy if asked: "Upay: [basic remedy]..."
-5. Follow-up question: "[Engaging question]?"
+- End with appropriate follow-up question based on language
+- Reference chart using language-specific format above
+- NO repetitive introductions in ongoing conversation
+- For HINGLISH: Use natural mixing like "Aapke chart mein foreign travel ke strong chances hain"
 
 USER QUERY: {user_query}
 
-Analyze chart above. Reference specific planets/houses/yogas. Stay under 120 words. End with question.
-
-**Disclaimer:** Interpretive insights based on Vedic traditions; consult professionals for major decisions."""
+{"Start with introduction, then " if intro_text else ""}Analyze chart and respond in DETECTED LANGUAGE ({detected_language.upper()}). Stay under 120 words.
+"""
 
         return prompt
 
@@ -202,10 +291,13 @@ Analyze chart above. Reference specific planets/houses/yogas. Stay under 120 wor
             self.logger.error(f"Chart summary error: {e}")
             return "Chart data temporarily unavailable. Please try again."
 
-    def reset_conversation(self):
-        """Reset conversation history for new session"""
+    def reset_conversation_state(self):
+        """Reset conversation state for new session"""
         self.conversation_history = []
-        return "Conversation history cleared! Ready for fresh questions."
+        self.current_language = None
+        self.conversation_started = False
+        self.introduction_given = False
+        return "Conversation reset! Ready for fresh questions."
 
 def main():
     """Main function to run the Sarika Pandey chatbot"""
@@ -248,7 +340,7 @@ def main():
                     continue
 
                 elif user_input.lower() == 'reset':
-                    print(bot.reset_conversation())
+                    print(bot.reset_conversation_state())
                     continue
 
                 elif not user_input:
